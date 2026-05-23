@@ -107,16 +107,18 @@ function navigate(page, push = true) {
     stock: 'Stock Register',
     reports: 'Monthly Report',
     masters: 'Masters',
-    more: 'More'
+    more: 'More',
+    scan: 'Scan Invoice / Bill',
+    'scan-review': 'Review Scanned Bill'
   };
   document.getElementById('page-title').textContent = titles[page] || page;
 
   const backBtn = document.getElementById('back-btn');
-  backBtn.style.display = (page === 'add-inward' || page === 'add-outward') ? 'block' : 'none';
+  backBtn.style.display = ['add-inward','add-outward','scan','scan-review'].includes(page) ? 'block' : 'none';
 
   document.getElementById('header-actions').innerHTML = '';
 
-  const pages = { dashboard, inward, 'add-inward': addInward, outward, 'add-outward': addOutward, stock, reports, masters, more };
+  const pages = { dashboard, inward, 'add-inward': addInward, outward, 'add-outward': addOutward, stock, reports, masters, more, scan, 'scan-review': scanReview };
   if (pages[page]) pages[page]();
 }
 
@@ -197,6 +199,10 @@ async function dashboard() {
         </div>
       </div>
 
+      <button class="action-btn" onclick="navigate('scan')" style="grid-column:1/-1;background:linear-gradient(135deg,#1F3864,#2E75B6);color:white;border-radius:14px;padding:18px;display:flex;align-items:center;justify-content:center;gap:12px;font-size:15px;font-weight:700;letter-spacing:0.01em;margin-bottom:2px;">
+        <i class="lucide-camera" style="font-size:28px"></i>
+        📷  Scan Invoice / Bill  —  AI Auto-Fill
+      </button>
       <div class="quick-actions">
         <button class="action-btn inward" onclick="navigate('add-inward')">
           <i class="lucide-plus-circle"></i>Add Inward
@@ -234,7 +240,8 @@ async function dashboard() {
 async function inward() {
   setLoading();
   document.getElementById('header-actions').innerHTML = `
-    <button onclick="navigate('add-inward')" style="color:white;padding:8px;font-size:13px;font-weight:600;background:rgba(255,255,255,0.2);border-radius:8px;border:none;cursor:pointer;">+ Add</button>`;
+    <button onclick="navigate('scan')" style="color:white;padding:6px 10px;font-size:12px;font-weight:600;background:rgba(255,255,255,0.2);border-radius:8px;border:none;cursor:pointer;margin-right:6px;">📷 Scan</button>
+    <button onclick="navigate('add-inward')" style="color:white;padding:6px 10px;font-size:12px;font-weight:600;background:rgba(255,255,255,0.2);border-radius:8px;border:none;cursor:pointer;">+ Add</button>`;
 
   const { data } = await sb.from('inward').select('*').order('date', { ascending: false }).limit(100);
   const rows = data || [];
@@ -813,6 +820,265 @@ function more() {
 function logout() {
   sessionStorage.removeItem('pinOk');
   location.reload();
+}
+
+
+// ── SCAN INVOICE (AI) ─────────────────────────────────────
+
+// Global storage for scan results shared between scan → scan-review
+let _scanData = null;
+
+function scan() {
+  document.getElementById('page-content').innerHTML = `
+    <div class="page-pad">
+
+      <div style="background:var(--primary);color:white;border-radius:16px;padding:20px;margin-bottom:16px;text-align:center;">
+        <div style="font-size:40px;margin-bottom:8px;">📷</div>
+        <div style="font-size:17px;font-weight:700;margin-bottom:6px;">Scan Invoice or Bill</div>
+        <div style="font-size:13px;opacity:0.85;line-height:1.6">Take a clear photo of the challan or invoice.<br>Claude AI will extract all the item details automatically.</div>
+      </div>
+
+      <div style="background:white;border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:14px;">
+        <div style="font-weight:700;font-size:14px;margin-bottom:14px;color:var(--primary)">📸 Take / Upload Photo</div>
+
+        <label for="scan-file-input" style="display:block;cursor:pointer;">
+          <div id="scan-preview-area" style="border:2.5px dashed var(--border);border-radius:12px;padding:32px 20px;text-align:center;background:var(--gray-100);transition:all 0.2s;">
+            <div style="font-size:48px;margin-bottom:10px;">🧾</div>
+            <div style="font-size:14px;font-weight:600;color:var(--primary);margin-bottom:4px;">Tap here to open camera</div>
+            <div style="font-size:12px;color:var(--text-secondary)">Or choose a photo from gallery</div>
+          </div>
+        </label>
+        <input type="file" id="scan-file-input" accept="image/*" capture="environment"
+          style="display:none;" onchange="processScanImage(this.files[0])">
+      </div>
+
+      <div style="background:var(--amber-light);border-radius:12px;padding:14px 16px;border-left:4px solid var(--amber);">
+        <div style="font-weight:700;color:var(--amber);font-size:13px;margin-bottom:6px;">📋 Tips for best results</div>
+        <div style="font-size:12px;color:var(--gray-600);line-height:1.8;">
+          ✓ Place the bill flat on a table<br>
+          ✓ Make sure full bill is in frame<br>
+          ✓ Good lighting — avoid shadows<br>
+          ✓ Hold phone steady, wait for focus<br>
+          ✓ Works best with printed bills
+        </div>
+      </div>
+
+      <div id="scan-status" style="margin-top:16px;"></div>
+    </div>`;
+}
+
+async function processScanImage(file) {
+  if (!file) return;
+
+  // Show preview and loading
+  const preview = document.getElementById('scan-preview-area');
+  const status = document.getElementById('scan-status');
+  const reader = new FileReader();
+
+  reader.onload = async (e) => {
+    const dataUrl = e.target.result;
+
+    // Show image preview
+    preview.innerHTML = `<img src="${dataUrl}" style="width:100%;border-radius:8px;max-height:220px;object-fit:contain;">`;
+    preview.style.padding = '8px';
+    preview.style.border = '2px solid var(--primary-light)';
+
+    status.innerHTML = `
+      <div style="background:white;border-radius:12px;padding:20px;text-align:center;box-shadow:var(--shadow);">
+        <div class="spinner" style="margin:0 auto 12px;width:32px;height:32px;border-width:4px;"></div>
+        <div style="font-weight:700;color:var(--primary);font-size:14px;margin-bottom:4px;">Claude AI is reading your bill...</div>
+        <div style="font-size:12px;color:var(--text-secondary);">Extracting items, quantities, rates — usually takes 5–10 seconds</div>
+      </div>`;
+
+    try {
+      // Convert to base64 (strip the data:image/...;base64, prefix)
+      const base64 = dataUrl.split(',')[1];
+      const mediaType = file.type || 'image/jpeg';
+
+      // Call Supabase Edge Function
+      const { data, error } = await sb.functions.invoke('scan-invoice', {
+        body: { imageBase64: base64, mediaType }
+      });
+
+      if (error) throw new Error(error.message);
+      if (!data.success) throw new Error(data.error || 'Scan failed');
+      if (!data.data.items || data.data.items.length === 0) throw new Error('No items found in the bill. Please try a clearer photo.');
+
+      // Store and navigate to review
+      _scanData = data.data;
+      navigate('scan-review');
+
+    } catch (err) {
+      status.innerHTML = `
+        <div style="background:var(--red-light);border-radius:12px;padding:16px;border-left:4px solid var(--red);">
+          <div style="font-weight:700;color:var(--red);margin-bottom:6px;">❌ Scan failed</div>
+          <div style="font-size:13px;color:var(--gray-600);margin-bottom:12px;">${esc(err.message)}</div>
+          <button class="btn btn-outline btn-sm" onclick="scan()" style="width:auto">Try again</button>
+        </div>`;
+    }
+  };
+
+  reader.readAsDataURL(file);
+}
+
+function scanReview() {
+  const d = _scanData;
+  if (!d) { navigate('scan'); return; }
+
+  const today = new Date().toISOString().split('T')[0];
+  const dateVal = d.date || today;
+
+  // Check which suppliers/items are new (not in master)
+  const knownSuppliers = new Set(masterSuppliers.map(s => s.name.toUpperCase()));
+  const knownItems = new Set(masterItems.map(i => i.name.toUpperCase()));
+  const supplierIsNew = d.supplier_name && !knownSuppliers.has(d.supplier_name.toUpperCase());
+  const newItems = (d.items||[]).filter(i => i.item_name && !knownItems.has(i.item_name.toUpperCase()));
+
+  document.getElementById('page-content').innerHTML = `
+    <div class="page-pad">
+
+      <!-- Header info -->
+      <div style="background:var(--green-light);border-radius:12px;padding:14px 16px;margin-bottom:16px;border-left:4px solid var(--green);">
+        <div style="font-weight:700;color:var(--green);font-size:13px;margin-bottom:4px;">✅ AI extracted ${d.items.length} item${d.items.length>1?'s':''} from your bill</div>
+        <div style="font-size:12px;color:var(--gray-600);">Review the details below. Edit anything that looks wrong, then tap Save All.</div>
+      </div>
+
+      ${supplierIsNew ? `
+      <div style="background:var(--amber-light);border-radius:10px;padding:12px 14px;margin-bottom:12px;border-left:3px solid var(--amber);font-size:12px;color:var(--gray-600);">
+        <b style="color:var(--amber);">⚠ New supplier detected:</b> "${esc(d.supplier_name)}" is not in your Supplier Master — it will be added automatically when you save.
+      </div>` : ''}
+
+      ${newItems.length > 0 ? `
+      <div style="background:var(--primary-pale);border-radius:10px;padding:12px 14px;margin-bottom:12px;border-left:3px solid var(--primary-light);font-size:12px;color:var(--gray-600);">
+        <b style="color:var(--primary);">ℹ ${newItems.length} new item${newItems.length>1?'s':''} detected</b> — these will be added to Item Master automatically.
+      </div>` : ''}
+
+      <!-- Bill header fields -->
+      <div class="form-section">
+        <div class="form-section-title">Bill Information</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Date</label>
+            <input type="date" class="form-control" id="sr-date" value="${dateVal}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Invoice No.</label>
+            <input type="text" class="form-control" id="sr-invoice" value="${esc(d.invoice_number||'')}" placeholder="Bill no.">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Supplier Name</label>
+          <input type="text" class="form-control" id="sr-supplier" value="${esc(d.supplier_name||'')}" placeholder="Supplier name">
+          ${supplierIsNew ? '<div class="form-hint" style="color:var(--amber);">★ New supplier — will be added to master</div>' : ''}
+        </div>
+      </div>
+
+      <!-- Items -->
+      <div class="form-section">
+        <div class="form-section-title">Items (${d.items.length})</div>
+        ${(d.items||[]).map((item, idx) => `
+          <div style="background:var(--gray-100);border-radius:10px;padding:14px;margin-bottom:12px;border:1.5px solid var(--border);">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+              <span style="font-size:12px;font-weight:700;color:var(--primary);background:var(--primary-pale);padding:3px 10px;border-radius:999px;">Item ${idx+1}</span>
+              ${!knownItems.has((item.item_name||'').toUpperCase()) ? '<span style="font-size:10px;color:var(--amber);font-weight:600;background:var(--amber-light);padding:3px 8px;border-radius:999px;">★ New item</span>' : '<span style="font-size:10px;color:var(--green);font-weight:600;background:var(--green-light);padding:3px 8px;border-radius:999px;">✓ In master</span>'}
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Item Name</label>
+                <input type="text" class="form-control" id="sr-item-${idx}" value="${esc(item.item_name||'')}" placeholder="Item name">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Size / Spec</label>
+                <input type="text" class="form-control" id="sr-size-${idx}" value="${esc(item.size_spec||'')}" placeholder="e.g. 2 inch">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Qty</label>
+                <input type="number" class="form-control" id="sr-qty-${idx}" value="${item.quantity||''}" min="0" step="any">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Unit</label>
+                <input type="text" class="form-control" id="sr-unit-${idx}" value="${esc(item.unit||'Nos')}" placeholder="Nos/Kg/Mtr">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Rate (₹)</label>
+                <input type="number" class="form-control" id="sr-rate-${idx}" value="${item.rate||''}" min="0" step="any" placeholder="0.00">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Amount (₹)</label>
+                <input type="number" class="form-control" id="sr-amt-${idx}" value="${item.total_amount||''}" min="0" step="any" placeholder="0.00">
+              </div>
+            </div>
+          </div>`).join('')}
+      </div>
+
+      <button class="btn btn-green" onclick="saveScanResults(${d.items.length})">
+        <i class="lucide-save"></i> Save All ${d.items.length} Item${d.items.length>1?'s':''} to Inward Register
+      </button>
+      <div style="height:20px"></div>
+    </div>`;
+}
+
+async function saveScanResults(count) {
+  const date = document.getElementById('sr-date').value;
+  const invoice = document.getElementById('sr-invoice').value.trim();
+  const supplier = document.getElementById('sr-supplier').value.trim().toUpperCase();
+
+  if (!date) { showToast('Please enter the date'); return; }
+  if (!supplier) { showToast('Please enter the supplier name'); return; }
+
+  // Auto-add supplier to master if new
+  const knownSuppliers = new Set(masterSuppliers.map(s => s.name.toUpperCase()));
+  if (supplier && !knownSuppliers.has(supplier)) {
+    await sb.from('suppliers').insert([{ name: supplier, products_supplied: 'Added via invoice scan' }]);
+  }
+
+  // Collect all items and save
+  const rows = [];
+  const newItemsToAdd = [];
+  const knownItems = new Set(masterItems.map(i => i.name.toUpperCase()));
+
+  for (let idx = 0; idx < count; idx++) {
+    const itemName = (document.getElementById(`sr-item-${idx}`)?.value || '').trim().toUpperCase();
+    const qty = parseFloat(document.getElementById(`sr-qty-${idx}`)?.value) || 0;
+    if (!itemName || !qty) continue;
+
+    const size = document.getElementById(`sr-size-${idx}`)?.value.trim() || null;
+    const unit = document.getElementById(`sr-unit-${idx}`)?.value.trim() || 'Nos';
+    const rate = parseFloat(document.getElementById(`sr-rate-${idx}`)?.value) || 0;
+    const amt  = parseFloat(document.getElementById(`sr-amt-${idx}`)?.value) || (qty * rate);
+
+    rows.push({ date, supplier_name: supplier, item_name: itemName, size_spec: size || null,
+      quantity: qty, unit, rate, total_amount: amt, invoice_number: invoice || null,
+      remark: 'Added via invoice scan' });
+
+    // Queue new items for master
+    if (!knownItems.has(itemName)) {
+      newItemsToAdd.push({ name: itemName, category: 'Consumable', unit, min_stock: 0 });
+      knownItems.add(itemName); // prevent duplicates in same bill
+    }
+  }
+
+  if (rows.length === 0) { showToast('No valid items to save'); return; }
+
+  // Add new items to master
+  for (const item of newItemsToAdd) {
+    await sb.from('items').insert([item]).select();
+  }
+
+  // Save all inward rows
+  const { error } = await sb.from('inward').insert(rows);
+  if (error) { showToast('Error saving: ' + error.message); return; }
+
+  // Reload masters to include new items/suppliers
+  await loadMasters();
+  _scanData = null;
+
+  showToast(`✓ Saved ${rows.length} entries!${newItemsToAdd.length > 0 ? ' + ' + newItemsToAdd.length + ' new items added to master' : ''}`);
+  navigate('inward');
 }
 
 // ── MASTERS — Full CRUD (replace everything from "// ── MASTERS" to end of file) ──────────
