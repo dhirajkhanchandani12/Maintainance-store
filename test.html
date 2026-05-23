@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>App Diagnostics</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f4f4f4; padding: 20px; font-size: 14px; }
+    h1 { color: #1F3864; margin-bottom: 4px; }
+    .subtitle { color: #666; margin-bottom: 24px; }
+    .card { background: white; border-radius: 12px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+    .card-title { font-weight: 700; font-size: 15px; margin-bottom: 12px; color: #333; }
+    .row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #eee; }
+    .row:last-child { border-bottom: none; }
+    .label { color: #555; }
+    .value { font-weight: 600; }
+    .ok    { color: #1F7A4A; }
+    .error { color: #C00000; }
+    .warn  { color: #D4A017; }
+    .pill  { padding: 3px 12px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+    .pill.ok    { background: #E6F4EC; color: #1F7A4A; }
+    .pill.error { background: #FFF0F0; color: #C00000; }
+    .pill.warn  { background: #FFF8E1; color: #D4A017; }
+    .pill.info  { background: #EBF2FF; color: #1F3864; }
+    pre { background: #f8f8f8; border-radius: 8px; padding: 12px; font-size: 12px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
+    .fix-box { background: #FFF8E1; border-left: 4px solid #D4A017; border-radius: 0 8px 8px 0; padding: 14px; margin-top: 12px; }
+    .fix-title { font-weight: 700; color: #D4A017; margin-bottom: 6px; }
+    .fix-steps { color: #555; line-height: 1.8; }
+    .sample-data { background: #f8f8f8; border-radius: 8px; padding: 10px; font-size: 12px; margin-top: 8px; max-height: 120px; overflow-y: auto; }
+    button { background: #1F3864; color: white; border: none; border-radius: 8px; padding: 12px 24px; font-size: 14px; font-weight: 600; cursor: pointer; margin-top: 8px; }
+    button:hover { background: #2E75B6; }
+    .spinner { display: inline-block; width: 18px; height: 18px; border: 3px solid #ddd; border-top-color: #1F3864; border-radius: 50%; animation: spin 0.7s linear infinite; vertical-align: middle; margin-right: 8px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+<h1>🔍 Maintenance Store — Diagnostics</h1>
+<p class="subtitle">This page checks if your app is set up correctly. Share the results with your support contact.</p>
+
+<div class="card">
+  <div class="card-title">Status</div>
+  <div id="status-area"><div class="spinner"></div> Running checks...</div>
+</div>
+
+<div id="results"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="config.js"></script>
+<script>
+async function runDiagnostics() {
+  const results = [];
+  const R = document.getElementById('results');
+
+  // ── CHECK 1: Config file loaded ──────────────────────
+  const configOk = typeof CONFIG !== 'undefined';
+  const urlOk = configOk && CONFIG.SUPABASE_URL && !CONFIG.SUPABASE_URL.includes('PASTE_YOUR');
+  const keyOk = configOk && CONFIG.SUPABASE_ANON_KEY && !CONFIG.SUPABASE_ANON_KEY.includes('PASTE_YOUR');
+
+  R.innerHTML += card('1. Configuration File (config.js)', [
+    row('config.js loaded', configOk ? ok('YES') : err('NOT LOADED — config.js is missing or has an error')),
+    row('Supabase URL set', urlOk ? ok(CONFIG.SUPABASE_URL) : err('NOT SET — still has placeholder text')),
+    row('Anon Key set', keyOk ? ok('Yes — key is present (' + (CONFIG?.SUPABASE_ANON_KEY?.length || 0) + ' chars)') : err('NOT SET — still has placeholder text')),
+    row('PIN set', configOk && CONFIG.APP_PIN ? ok(CONFIG.APP_PIN + ' (4 digits)') : warn('Using default: 1234')),
+    row('Factory Name', configOk && CONFIG.FACTORY_NAME ? info(CONFIG.FACTORY_NAME) : warn('Not set')),
+  ], !configOk || !urlOk || !keyOk ? `
+    <div class="fix-box">
+      <div class="fix-title">⚠ Fix Required — config.js has wrong values</div>
+      <div class="fix-steps">
+        1. Open GitHub → your repo → click config.js → click ✏ Edit<br>
+        2. Replace PASTE_YOUR_SUPABASE_URL_HERE with your actual URL from Supabase → Settings → API<br>
+        3. Replace PASTE_YOUR_SUPABASE_ANON_KEY_HERE with your actual anon key<br>
+        4. Click Commit changes
+      </div>
+    </div>` : '');
+
+  if (!urlOk || !keyOk) {
+    document.getElementById('status-area').innerHTML = err('❌ Config is not set up correctly. Fix the issues above first.');
+    return;
+  }
+
+  // ── CHECK 2: Supabase connection ─────────────────────
+  let connOk = false, connError = '';
+  try {
+    const sb = supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+    const { data, error } = await sb.from('items').select('count', { count: 'exact', head: true });
+    if (error) { connError = error.message; }
+    else { connOk = true; window._sb = sb; }
+  } catch(e) { connError = e.message; }
+
+  R.innerHTML += card('2. Supabase Connection', [
+    row('Can connect to database', connOk ? ok('YES — Connected successfully') : err('FAILED: ' + connError)),
+  ], !connOk ? `
+    <div class="fix-box">
+      <div class="fix-title">⚠ Cannot connect to Supabase</div>
+      <div class="fix-steps">
+        Possible causes:<br>
+        1. Wrong Supabase URL or Key in config.js (double-check by copying fresh from Supabase → Settings → API)<br>
+        2. Your Supabase project is paused (free tier pauses after inactivity — go to supabase.com and click Resume)<br>
+        3. Internet connection issue
+      </div>
+    </div>` : '');
+
+  if (!connOk) {
+    document.getElementById('status-area').innerHTML = err('❌ Cannot connect to database. Fix the issues above.');
+    return;
+  }
+
+  // ── CHECK 3: Tables exist and row counts ─────────────
+  const sb = window._sb;
+  const tables = ['items', 'machines', 'suppliers', 'inward', 'outward', 'opening_stock'];
+  const counts = {};
+  const tableErrors = [];
+
+  for (const t of tables) {
+    try {
+      const { count, error } = await sb.from(t).select('*', { count: 'exact', head: true });
+      if (error) { tableErrors.push(t + ': ' + error.message); counts[t] = -1; }
+      else counts[t] = count;
+    } catch(e) { tableErrors.push(t + ': ' + e.message); counts[t] = -1; }
+  }
+
+  const tableRows = tables.map(t => {
+    if (counts[t] === -1) return row(t, err('ERROR — table might not exist'));
+    if (counts[t] === 0) return row(t, warn('0 rows — table is EMPTY'));
+    return row(t, ok(counts[t] + ' rows'));
+  });
+
+  const tablesOk = counts['items'] > 0 && counts['machines'] > 0 && counts['suppliers'] > 0;
+  const missingSetup = counts['items'] === 0 || counts['machines'] === 0 || counts['suppliers'] === 0;
+  const tablesExist = !tableErrors.length;
+
+  R.innerHTML += card('3. Database Tables', tableRows.join(''),
+    !tablesExist ? `
+    <div class="fix-box">
+      <div class="fix-title">⚠ Some tables are missing</div>
+      <div class="fix-steps">
+        You need to run the supabase_setup.sql file:<br>
+        1. Open Supabase → SQL Editor → New query<br>
+        2. Open the supabase_setup.sql file → Select All → Copy → Paste<br>
+        3. Click Run
+      </div>
+    </div>` :
+    missingSetup ? `
+    <div class="fix-box">
+      <div class="fix-title">⚠ Tables exist but master data is missing (items/machines/suppliers are empty)</div>
+      <div class="fix-steps">
+        The tables were created but the initial data was not inserted.<br>
+        Fix: Open Supabase → SQL Editor → New query, then run ONLY this part:
+        <pre>-- Run this to insert all items, machines, suppliers
+-- Copy from supabase_setup.sql starting from "STEP 3: Seed Item Master"
+-- down to the end of the file</pre>
+        OR re-run the entire supabase_setup.sql file — it is safe to run again.
+      </div>
+    </div>` : '');
+
+  // ── CHECK 4: Sample data preview ─────────────────────
+  let sampleHtml = '';
+  if (counts['items'] > 0) {
+    const { data } = await sb.from('items').select('name, category, unit').limit(5);
+    sampleHtml += '<b>First 5 Items:</b><div class="sample-data">' + (data||[]).map(i => `${i.name} (${i.category}, ${i.unit})`).join('<br>') + '</div>';
+  }
+  if (counts['machines'] > 0) {
+    const { data } = await sb.from('machines').select('name, department').limit(5);
+    sampleHtml += '<br><b>First 5 Machines:</b><div class="sample-data">' + (data||[]).map(m => `${m.name} (${m.department})`).join('<br>') + '</div>';
+  }
+  if (counts['suppliers'] > 0) {
+    const { data } = await sb.from('suppliers').select('name').limit(5);
+    sampleHtml += '<br><b>First 5 Suppliers:</b><div class="sample-data">' + (data||[]).map(s => s.name).join('<br>') + '</div>';
+  }
+
+  if (sampleHtml) {
+    R.innerHTML += card('4. Sample Data Preview', sampleHtml, '');
+  }
+
+  // ── FINAL STATUS ─────────────────────────────────────
+  const allGood = configOk && urlOk && keyOk && connOk && tablesExist && !missingSetup;
+  document.getElementById('status-area').innerHTML = allGood
+    ? '<span style="color:#1F7A4A;font-size:16px;font-weight:700;">✅ Everything looks good! Your app is set up correctly.</span>'
+    : '<span style="color:#C00000;font-size:16px;font-weight:700;">❌ Found issues — scroll down to see the fixes needed.</span>';
+}
+
+// Helpers
+function card(title, content, fix='') {
+  return `<div class="card"><div class="card-title">${title}</div>${Array.isArray(content) ? content.join('') : content}${fix}</div>`;
+}
+function row(label, valueHtml) {
+  return `<div class="row"><div class="label">${label}</div><div class="value">${valueHtml}</div></div>`;
+}
+function ok(t)   { return `<span class="pill ok">✓ ${t}</span>`; }
+function err(t)  { return `<span class="pill error">✗ ${t}</span>`; }
+function warn(t) { return `<span class="pill warn">⚠ ${t}</span>`; }
+function info(t) { return `<span class="pill info">${t}</span>`; }
+
+runDiagnostics().catch(e => {
+  document.getElementById('status-area').innerHTML = err('Unexpected error: ' + e.message);
+});
+</script>
+</body>
+</html>
