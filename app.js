@@ -815,59 +815,280 @@ function logout() {
   location.reload();
 }
 
-// ── MASTERS ───────────────────────────────────────────────
+// ── MASTERS — Full CRUD (replace everything from "// ── MASTERS" to end of file) ──────────
+
+const ITEM_CATEGORIES = ['Bearing','Belt','Electrical','Valve','Piping','Hardware','Tool','Lubricant','Consumable'];
+const ITEM_UNITS = ['Nos','Kg','Mtr','Roll','Pack','Box','Set','Ltr'];
+
 async function masters() {
   currentTab = currentTab || 'items';
-  setLoading();
-
-  async function loadTab(tab) {
-    currentTab = tab;
-    document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
-    const listEl = document.getElementById('masters-list');
-
-    if (tab === 'items') {
-      const { data } = await sb.from('items').select('*').order('name');
-      listEl.innerHTML = (data || []).map(i => `
-        <div class="master-item">
-          <div style="flex:1">
-            <div class="master-name">${esc(i.name)}</div>
-            <div class="master-sub">Unit: ${esc(i.unit)} · Min Stock: ${i.min_stock}</div>
-          </div>
-          <span class="cat-pill">${esc(i.category)}</span>
-        </div>`).join('');
-    } else if (tab === 'machines') {
-      const { data } = await sb.from('machines').select('*').order('name');
-      listEl.innerHTML = (data || []).map(m => `
-        <div class="master-item">
-          <div style="flex:1">
-            <div class="master-name">${esc(m.name)}</div>
-            <div class="master-sub">${esc(m.department)} · ${esc(m.machine_type)}</div>
-          </div>
-        </div>`).join('');
-    } else {
-      const { data } = await sb.from('suppliers').select('*').order('name');
-      listEl.innerHTML = (data || []).map(s => `
-        <div class="master-item">
-          <div style="flex:1">
-            <div class="master-name">${esc(s.name)}</div>
-            <div class="master-sub">${esc(s.products_supplied || '—')}</div>
-          </div>
-        </div>`).join('');
-    }
-  }
+  document.getElementById('header-actions').innerHTML = `
+    <button onclick="showAddMaster()" style="color:white;padding:8px 12px;font-size:13px;font-weight:600;background:rgba(255,255,255,0.2);border-radius:8px;border:none;cursor:pointer;">+ Add New</button>`;
 
   document.getElementById('page-content').innerHTML = `
     <div class="tab-bar">
-      <div class="tab ${currentTab==='items'?'active':''}" data-tab="items" onclick="masters_loadTab('items')">Items</div>
-      <div class="tab ${currentTab==='machines'?'active':''}" data-tab="machines" onclick="masters_loadTab('machines')">Machines</div>
-      <div class="tab ${currentTab==='suppliers'?'active':''}" data-tab="suppliers" onclick="masters_loadTab('suppliers')">Suppliers</div>
+      <div class="tab" data-tab="items"    onclick="masters_loadTab('items')">Items</div>
+      <div class="tab" data-tab="machines" onclick="masters_loadTab('machines')">Machines</div>
+      <div class="tab" data-tab="suppliers"onclick="masters_loadTab('suppliers')">Suppliers</div>
     </div>
-    <div style="background:white;border-radius:12px;margin:16px;box-shadow:var(--shadow)">
+    <div class="search-bar" style="margin:12px 16px">
+      <i class="lucide-search"></i>
+      <input type="text" placeholder="Search..." id="master-search" oninput="filterMasters()"/>
+    </div>
+    <div style="background:white;border-radius:12px;margin:0 16px 16px;box-shadow:var(--shadow)">
       <div id="masters-list"><div class="loading"><div class="spinner"></div></div></div>
     </div>`;
 
-  window.masters_loadTab = loadTab;
-  loadTab(currentTab);
+  window.masters_loadTab = async (tab) => {
+    currentTab = tab;
+    document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+    const listEl = document.getElementById('masters-list');
+    listEl.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+
+    if (tab === 'items') {
+      const { data } = await sb.from('items').select('*').order('name');
+      listEl.innerHTML = (data||[]).length === 0 ? '<div class="list-empty">No items yet. Tap + Add New.</div>' :
+        (data||[]).map(i => `
+          <div class="master-item" id="item-${i.id}">
+            <div style="flex:1">
+              <div class="master-name">${esc(i.name)}</div>
+              <div class="master-sub">Unit: ${esc(i.unit)} · Min: ${i.min_stock || 0}</div>
+            </div>
+            <span class="cat-pill">${esc(i.category)}</span>
+            <button onclick='showEditItem(${JSON.stringify(i)})' style="padding:6px;margin-left:8px;color:var(--primary-light);background:none;border:none;cursor:pointer;font-size:14px;">✏️</button>
+            <button onclick="deleteMaster('items','${i.id}','${esc(i.name)}')" style="padding:6px;color:var(--red);background:none;border:none;cursor:pointer;font-size:14px;">🗑</button>
+          </div>`).join('');
+    } else if (tab === 'machines') {
+      const { data } = await sb.from('machines').select('*').order('name');
+      listEl.innerHTML = (data||[]).length === 0 ? '<div class="list-empty">No machines yet. Tap + Add New.</div>' :
+        (data||[]).map(m => `
+          <div class="master-item" id="mach-${m.id}">
+            <div style="flex:1">
+              <div class="master-name">${esc(m.name)}</div>
+              <div class="master-sub">${esc(m.department||'')} · ${esc(m.machine_type||'')}</div>
+            </div>
+            <button onclick='showEditMachine(${JSON.stringify(m)})' style="padding:6px;color:var(--primary-light);background:none;border:none;cursor:pointer;font-size:14px;">✏️</button>
+            <button onclick="deleteMaster('machines','${m.id}','${esc(m.name)}')" style="padding:6px;color:var(--red);background:none;border:none;cursor:pointer;font-size:14px;">🗑</button>
+          </div>`).join('');
+    } else {
+      const { data } = await sb.from('suppliers').select('*').order('name');
+      listEl.innerHTML = (data||[]).length === 0 ? '<div class="list-empty">No suppliers yet. Tap + Add New.</div>' :
+        (data||[]).map(s => `
+          <div class="master-item" id="sup-${s.id}">
+            <div style="flex:1">
+              <div class="master-name">${esc(s.name)}</div>
+              <div class="master-sub">${esc(s.products_supplied||'—')}</div>
+            </div>
+            <button onclick='showEditSupplier(${JSON.stringify(s)})' style="padding:6px;color:var(--primary-light);background:none;border:none;cursor:pointer;font-size:14px;">✏️</button>
+            <button onclick="deleteMaster('suppliers','${s.id}','${esc(s.name)}')" style="padding:6px;color:var(--red);background:none;border:none;cursor:pointer;font-size:14px;">🗑</button>
+          </div>`).join('');
+    }
+  };
+  masters_loadTab(currentTab);
+}
+
+function filterMasters() {
+  const q = (document.getElementById('master-search')?.value || '').toLowerCase();
+  document.querySelectorAll('#masters-list .master-item').forEach(el => {
+    el.style.display = el.textContent.toLowerCase().includes(q) ? '' : 'none';
+  });
+}
+
+function showAddMaster() {
+  if (currentTab === 'items') showItemModal(null);
+  else if (currentTab === 'machines') showMachineModal(null);
+  else showSupplierModal(null);
+}
+
+function showEditItem(item) { showItemModal(item); }
+function showEditMachine(m) { showMachineModal(m); }
+function showEditSupplier(s) { showSupplierModal(s); }
+
+function showItemModal(item) {
+  const isEdit = !!item;
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <div class="modal-title">${isEdit ? 'Edit Item' : 'Add New Item'}</div>
+      <div class="form-group">
+        <label class="form-label">Item Name <span>*</span></label>
+        <input type="text" class="form-control" id="mi-name" value="${esc(item?.name||'')}" placeholder="e.g. 6206 Bearing">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Category <span>*</span></label>
+          <select class="form-control" id="mi-cat">
+            <option value="">Select...</option>
+            ${ITEM_CATEGORIES.map(c=>`<option value="${c}" ${item?.category===c?'selected':''}>${c}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Unit <span>*</span></label>
+          <select class="form-control" id="mi-unit">
+            <option value="">Select...</option>
+            ${ITEM_UNITS.map(u=>`<option value="${u}" ${item?.unit===u?'selected':''}>${u}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Minimum Stock Level</label>
+        <input type="number" class="form-control" id="mi-min" value="${item?.min_stock||0}" min="0" step="any">
+        <div class="form-hint">You will get a low-stock alert when quantity falls to or below this number</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Notes / Spec</label>
+        <input type="text" class="form-control" id="mi-notes" value="${esc(item?.notes||'')}" placeholder="Optional">
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" style="flex:1" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+        <button class="btn btn-primary" style="flex:2" onclick="saveItem('${item?.id||''}')">
+          ${isEdit ? 'Save Changes' : 'Add Item'}
+        </button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+async function saveItem(id) {
+  const name = document.getElementById('mi-name').value.trim().toUpperCase();
+  const category = document.getElementById('mi-cat').value;
+  const unit = document.getElementById('mi-unit').value;
+  const min_stock = parseFloat(document.getElementById('mi-min').value) || 0;
+  const notes = document.getElementById('mi-notes').value.trim();
+
+  if (!name || !category || !unit) { showToast('Please fill Name, Category, and Unit'); return; }
+
+  const data = { name, category, unit, min_stock, notes: notes || null };
+  let error;
+  if (id) {
+    ({ error } = await sb.from('items').update(data).eq('id', id));
+  } else {
+    ({ error } = await sb.from('items').insert([data]));
+  }
+  if (error) { showToast('Error: ' + error.message); return; }
+
+  await loadMasters();
+  document.querySelector('.modal-overlay').remove();
+  showToast(id ? '✓ Item updated!' : '✓ Item added!');
+  masters_loadTab('items');
+}
+
+function showMachineModal(m) {
+  const isEdit = !!m;
+  const depts = ['Dyeing','Finishing','Utility','Electrical','General'];
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <div class="modal-title">${isEdit ? 'Edit Machine' : 'Add New Machine'}</div>
+      <div class="form-group">
+        <label class="form-label">Machine Name <span>*</span></label>
+        <input type="text" class="form-control" id="mm-name" value="${esc(m?.name||'')}" placeholder="e.g. DRUM-15, JET-16">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Department</label>
+          <select class="form-control" id="mm-dept">
+            <option value="">Select...</option>
+            ${depts.map(d=>`<option value="${d}" ${m?.department===d?'selected':''}>${d}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Type</label>
+          <input type="text" class="form-control" id="mm-type" value="${esc(m?.machine_type||'')}" placeholder="e.g. Drum Dyeing">
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" style="flex:1" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+        <button class="btn btn-primary" style="flex:2" onclick="saveMachine('${m?.id||''}')">
+          ${isEdit ? 'Save Changes' : 'Add Machine'}
+        </button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+async function saveMachine(id) {
+  const name = document.getElementById('mm-name').value.trim().toUpperCase();
+  const department = document.getElementById('mm-dept').value;
+  const machine_type = document.getElementById('mm-type').value.trim();
+  if (!name) { showToast('Please enter Machine Name'); return; }
+  const data = { name, department: department||null, machine_type: machine_type||null };
+  let error;
+  if (id) ({ error } = await sb.from('machines').update(data).eq('id', id));
+  else ({ error } = await sb.from('machines').insert([data]));
+  if (error) { showToast('Error: ' + error.message); return; }
+  await loadMasters();
+  document.querySelector('.modal-overlay').remove();
+  showToast(id ? '✓ Machine updated!' : '✓ Machine added!');
+  masters_loadTab('machines');
+}
+
+function showSupplierModal(s) {
+  const isEdit = !!s;
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <div class="modal-title">${isEdit ? 'Edit Supplier' : 'Add New Supplier'}</div>
+      <div class="form-group">
+        <label class="form-label">Supplier Name <span>*</span></label>
+        <input type="text" class="form-control" id="ms-name" value="${esc(s?.name||'')}" placeholder="e.g. Shree Laxmi Traders">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Products Supplied</label>
+        <input type="text" class="form-control" id="ms-prod" value="${esc(s?.products_supplied||'')}" placeholder="e.g. Bearings, Pipes">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Contact Person</label>
+          <input type="text" class="form-control" id="ms-contact" value="${esc(s?.contact_person||'')}" placeholder="Name">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Phone</label>
+          <input type="tel" class="form-control" id="ms-phone" value="${esc(s?.phone||'')}" placeholder="Mobile no.">
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" style="flex:1" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+        <button class="btn btn-primary" style="flex:2" onclick="saveSupplier('${s?.id||''}')">
+          ${isEdit ? 'Save Changes' : 'Add Supplier'}
+        </button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+async function saveSupplier(id) {
+  const name = document.getElementById('ms-name').value.trim().toUpperCase();
+  if (!name) { showToast('Please enter Supplier Name'); return; }
+  const data = {
+    name,
+    products_supplied: document.getElementById('ms-prod').value.trim() || null,
+    contact_person: document.getElementById('ms-contact').value.trim() || null,
+    phone: document.getElementById('ms-phone').value.trim() || null
+  };
+  let error;
+  if (id) ({ error } = await sb.from('suppliers').update(data).eq('id', id));
+  else ({ error } = await sb.from('suppliers').insert([data]));
+  if (error) { showToast('Error: ' + error.message); return; }
+  await loadMasters();
+  document.querySelector('.modal-overlay').remove();
+  showToast(id ? '✓ Supplier updated!' : '✓ Supplier added!');
+  masters_loadTab('suppliers');
+}
+
+async function deleteMaster(table, id, name) {
+  if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
+  const { error } = await sb.from(table).delete().eq('id', id);
+  if (error) { showToast('Error: ' + error.message); return; }
+  await loadMasters();
+  showToast('✓ Deleted');
+  masters_loadTab(currentTab);
 }
 
 // ── UTILS ─────────────────────────────────────────────────
