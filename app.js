@@ -895,17 +895,21 @@ async function processScanImage(file) {
       const base64 = dataUrl.split(',')[1];
       const mediaType = file.type || 'image/jpeg';
 
-      // Call Supabase Edge Function
-      const { data, error } = await sb.functions.invoke('scan-invoice', {
-        body: { imageBase64: base64, mediaType }
+      // Call Vercel serverless function (API key is hidden server-side)
+      const response = await fetch('/api/scan-invoice', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageBase64: base64, mediaType })
       });
 
-      if (error) throw new Error(error.message);
-      if (!data.success) throw new Error(data.error || 'Scan failed');
-      if (!data.data.items || data.data.items.length === 0) throw new Error('No items found in the bill. Please try a clearer photo.');
+      if (!response.ok) throw new Error('Server error ' + response.status + '. Please try again.');
+      const result = await response.json();
+
+      if (!result.success) throw new Error(result.error || 'Scan failed. Please try again.');
+      if (!result.data.items || result.data.items.length === 0) throw new Error('No items found in the bill. Try a clearer photo with better lighting.');
 
       // Store and navigate to review
-      _scanData = data.data;
+      _scanData = result.data;
       navigate('scan-review');
 
     } catch (err) {
