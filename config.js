@@ -9,7 +9,7 @@ const CONFIG = {
   SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN5aXJmbGFqcmFrbnNlcW9tbXpvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1MDA2MTgsImV4cCI6MjA5NTA3NjYxOH0.4NrMNwTE341Q4onNKhZFGtlCHPJqpcOH278qXQbzSZw',
 
   // PIN to open the app (change this to whatever you want, min 4 digits)
-  APP_PIN: '1996',
+  APP_PIN: '2468',
 
   // Your factory name (shown in the app header)
   FACTORY_NAME: 'Radharani Processors',
