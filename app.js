@@ -703,10 +703,11 @@ async function saveOpeningStock() {
     rows.push({ item_name: inp.dataset.item, quantity: parseFloat(inp.value) || 0, updated_at: new Date().toISOString() });
   });
 
-  for (const row of rows) {
-    await sb.from('opening_stock').upsert(rows, { onConflict: 'item_name' });
-  }
-  document.querySelector('.modal-overlay').remove();
+  const { error } = await sb.from('opening_stock')
+    .upsert(rows, { onConflict: 'item_name' });
+  if (error) { showToast('Error saving: ' + error.message); return; }
+  await loadMasters();
+  document.querySelector('.modal-overlay')?.remove();
   showToast('✓ Opening stock saved!');
   stock();
 }
