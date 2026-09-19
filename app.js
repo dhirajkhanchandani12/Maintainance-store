@@ -704,7 +704,7 @@ async function saveOpeningStock() {
   });
 
   for (const row of rows) {
-    await sb.from('opening_stock').upsert(row, { onConflict: 'item_name' });
+    await sb.from('opening_stock').upsert(rows, { onConflict: 'item_name' });
   }
   document.querySelector('.modal-overlay').remove();
   showToast('✓ Opening stock saved!');
